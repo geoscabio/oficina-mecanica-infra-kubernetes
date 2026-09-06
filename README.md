@@ -28,7 +28,16 @@ Branches protegidas esperadas:
 - `release/*`
 - `main`
 
-Toda mudança deve passar por PR, CI, aprovação e Quality gate. Maintainers e admins podem usar bypass somente via PR quando necessário.
+As branches protegidas usam dois rulesets ativos:
+
+- **🔒 Proteção Git Flow, sem bypass:** exige PR, conversas resolvidas, checks `🔀 01 · Validar fluxo de branches` e `🚦 03 · Quality gate` aprovados; bloqueia push direto, force push e deleção. A lista de bypass fica vazia, inclusive para admins e maintainers.
+- **👥 Aprovação de PR:** exige uma aprovação, descarta aprovações antigas e exige revisão por alguém diferente do último autor do push. Somente esta regra permite bypass via PR para `geoscabio`, `sousagabriel14`, maintainers e admins.
+
+O bypass dispensa a revisão de outra pessoa, nunca o fluxo ou os checks. PRs podem ser abertos de qualquer origem, mas o merge exige `branch de trabalho -> develop -> release -> main`. Hotfix permanece pós-entrega, sem exceção habilitada.
+
+O ruleset de fluxo usa `strict_required_status_checks_policy=false` para não exigir promoção inversa entre branches; checks continuam obrigatórios e conflitos reais precisam ser resolvidos. O proprietário ainda pode alterar as configurações administrativas: o bloqueio depende dos rulesets ativos e da integridade dos workflows de validação.
+
+Repetir este padrão em cada novo repositório. A configuração detalhada está no [guia de GitHub Actions da API](https://github.com/geoscabio/oficina-mecanica-api/blob/develop/docs/deploy/github-actions.md#-proteções-obrigatórias-recomendadas).
 
 ## 🔁 Workflows
 
@@ -42,7 +51,7 @@ Toda mudança deve passar por PR, CI, aprovação e Quality gate. Maintainers e 
 | `🔀 CD Release` | Registrar deploy lógico em `homologation` e abrir PR para `main` quando habilitado. |
 | `🏁 CD Production` | Registrar deploy lógico em `production`. |
 
-O desenho dos workflows segue a API. A diferença fica apenas no conteúdo técnico de cada job: aqui a validação e o deploy são de Terraform/EKS/ECR.
+O desenho dos workflows segue a API. A diferença fica apenas no conteúdo técnico de cada job: aqui a validação e o deploy são de Terraform/EKS/ECR. O título de execução do `🔀 CD Release` é `🔀 Registrar deploy em release`; produção só é registrada depois do merge em `main`.
 
 ## 🌐 Dependência da VPC
 
