@@ -1,0 +1,333 @@
+name: "☁️ AWS Deploy"
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        description: "GitHub Environment used by this deploy."
+        required: true
+        type: string
+    outputs:
+      terraform_action:
+        description: "Resolved Terraform action: apply or destroy."
+        value: ${{ jobs.resolve_action.outputs.terraform_action }}
+
+env:
+  TF_WORKING_DIRECTORY: infra/terraform/environments/dev
+  TERRAFORM_VERSION: "1.15.8"
+  SSM_VPC_PREFIX: /oficina-mecanica/development/vpc
+  SSM_VPC_STATUS_PARAMETER: /oficina-mecanica/development/status/vpc
+  SSM_KUBERNETES_PREFIX: /oficina-mecanica/development/kubernetes
+  SSM_KUBERNETES_STATUS_PARAMETER: /oficina-mecanica/development/status/kubernetes
+
+jobs:
+  resolve_action:
+    name: "🔎 01 · Resolver ação do Terraform"
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment_name }}
+    outputs:
+      terraform_action: ${{ steps.resolve_terraform_action.outputs.terraform_action }}
+
+    steps:
+      - name: "📥 01 · Baixar código do repositório"
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: "🚦 02 · Ler terraform-action.env e validar troca segura de destroy"
+        id: resolve_terraform_action
+        env:
+          GITHUB_BEFORE: ${{ github.event.before }}
+          GITHUB_AFTER: ${{ github.sha }}
+        run: |
+          control_file="$TF_WORKING_DIRECTORY/terraform-action.env"
+          terraform_action="apply"
+
+          if [ -f "$control_file" ]; then
+            configured_action="$(grep -E '^[[:space:]]*TERRAFORM_ACTION[[:space:]]=' "$control_file" | tail -n 1 | cut -d '=' -f 2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
+
+            if [ -n "$configured_action" ]; then
+              terraform_action="$configured_action"
+            fi
+          fi
+
+          case "$terraform_action" in
+            apply|destroy)
+              ;;
+            *)
+              echo "::error::Invalid TERRAFORM_ACTION '$terraform_action'. Use 'apply' or 'destroy'."
+              exit 1
+              ;;
+          esac
+
+          if [ "$terraform_action" = "destroy" ]; then
+            destroy_control_changed="false"
+
+            if [ -z "$GITHUB_BEFORE" ] || [ "$GITHUB_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              destroy_control_changed="true"
+            elif git diff --name-only "$GITHUB_BEFORE" "$GITHUB_AFTER" -- "$control_file" | grep -qx "$control_file"; then
+              destroy_control_changed="true"
+            fi
+
+            if [ "$destroy_control_changed" != "true" ]; then
+              echo "::error::TERRAFORM_ACTION=destroy is present but terraform-action.env was not changed in this push. Change it back to apply or open a dedicated destroy PR."
+              exit 1
+            fi
+
+            echo "::warning::TERRAFORM_ACTION=destroy detected. This run will destroy AWS resources managed by Terraform."
+          fi
+
+          if [ "$terraform_action" = "apply" ]; then
+            echo "::notice::>>> ACAO DECIDIDA: APPLY (criar/atualizar recursos AWS) <<<"
+          else
+            echo "::notice::>>> ACAO DECIDIDA: DESTROY (destruir recursos AWS) <<<"
+          fi
+
+          echo "terraform_action=$terraform_action" >> "$GITHUB_OUTPUT"
+
+  prepare_and_plan:
+    name: "📋 02 · Preparar variáveis e gerar plano do Terraform"
+    needs: resolve_action
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment_name }}
+    outputs:
+      cluster_name_before_destroy: ${{ steps.capture_destroy_context.outputs.cluster_name_before_destroy }}
+      ecr_repository_name_before_destroy: ${{ steps.capture_destroy_context.outputs.ecr_repository_name_before_destroy }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      EKS_CLUSTER_ROLE_NAME: ${{ vars.EKS_CLUSTER_ROLE_NAME || 'LabRole' }}
+      EKS_NODE_ROLE_NAME: ${{ vars.EKS_NODE_ROLE_NAME || 'LabRole' }}
+      TERRAFORM_ACTION: ${{ needs.resolve_action.outputs.terraform_action }}
+
+    steps:
+      - name: "📥 01 · Baixar código do repositório"
+        uses: actions/checkout@v7
+
+      - name: "🔑 02 · Configurar credenciais AWS"
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "🛠️ 03 · Instalar Terraform"
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: "🚦 04 · Validar dependência da VPC"
+        run: |
+          if [ "$TERRAFORM_ACTION" = "destroy" ]; then
+            echo "Skipping VPC dependency validation because this run will destroy Kubernetes resources."
+            exit 0
+          fi
+
+          vpc_status="$(aws ssm get-parameter --name "$SSM_VPC_STATUS_PARAMETER" --query 'Parameter.Value' --output text)"
+          if [ "$vpc_status" != "ready" ]; then
+            echo "::error::VPC dependency is not ready. Expected ready, got $vpc_status."
+            exit 1
+          fi
+
+          vpc_id="$(aws ssm get-parameter --name "$SSM_VPC_PREFIX/vpc_id" --query 'Parameter.Value' --output text)"
+          private_subnet_ids="$(aws ssm get-parameter --name "$SSM_VPC_PREFIX/private_subnet_ids" --query 'Parameter.Value' --output text)"
+
+          if [ -z "$vpc_id" ] || [ -z "$private_subnet_ids" ]; then
+            echo "::error::VPC SSM outputs are incomplete."
+            exit 1
+          fi
+
+          echo "VPC dependency validated through SSM."
+
+      - name: "📦 05 · Restaurar cache do state Terraform"
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate.backup
+          key: tfstate-kubernetes-${{ inputs.environment_name }}-${{ github.run_id }}
+          restore-keys: |
+            tfstate-kubernetes-${{ inputs.environment_name }}-
+
+      - name: "📝 06 · Escrever variáveis do Terraform"
+        run: |
+          cat > "$TF_WORKING_DIRECTORY/zz_ci.auto.tfvars.json" <<JSON
+          {
+            "aws_region": "$AWS_REGION",
+            "eks_cluster_role_name": "$EKS_CLUSTER_ROLE_NAME",
+            "eks_node_role_name": "$EKS_NODE_ROLE_NAME"
+          }
+          JSON
+
+      - name: "🚀 07 · Inicializar Terraform"
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" init -input=false
+
+      - name: "🔍 08 · Validar configuração Terraform"
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" validate
+
+      - name: "🛡️ 09 · Capturar Kubernetes atual antes do destroy"
+        id: capture_destroy_context
+        if: env.TERRAFORM_ACTION == 'destroy'
+        run: |
+          set -euo pipefail
+
+          cluster_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw eks_cluster_name 2>/dev/null || true)"
+          ecr_repository_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw ecr_repository_name 2>/dev/null || true)"
+
+          if [ -z "$cluster_name" ] || [ -z "$ecr_repository_name" ]; then
+            echo "::error::Destroy blocked: previous Kubernetes outputs were not found in Terraform state."
+            exit 1
+          fi
+
+          aws eks describe-cluster --name "$cluster_name" --query 'cluster.name' --output text
+          aws ecr describe-repositories --repository-names "$ecr_repository_name" --query 'repositories[0].repositoryName' --output text
+
+          echo "cluster_name_before_destroy=$cluster_name" >> "$GITHUB_OUTPUT"
+          echo "ecr_repository_name_before_destroy=$ecr_repository_name" >> "$GITHUB_OUTPUT"
+          echo "Kubernetes context captured for post-destroy validation."
+
+      - name: "📐 10 · Gerar plano do Terraform (apply)"
+        if: env.TERRAFORM_ACTION == 'apply'
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" plan -input=false -out=tfplan
+
+      - name: "📐 10 · Gerar plano do Terraform (destroy)"
+        if: env.TERRAFORM_ACTION == 'destroy'
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" plan -destroy -input=false -out=tfplan
+
+      - name: "⬆️ 11 · Publicar plano do Terraform como artefato"
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan-kubernetes-${{ github.run_id }}
+          path: ${{ env.TF_WORKING_DIRECTORY }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+  apply_or_destroy:
+    name: "☁️ 03 · Aplicar ou destruir Kubernetes"
+    needs:
+      - resolve_action
+      - prepare_and_plan
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment_name }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TERRAFORM_ACTION: ${{ needs.resolve_action.outputs.terraform_action }}
+      CLUSTER_NAME_BEFORE_DESTROY: ${{ needs.prepare_and_plan.outputs.cluster_name_before_destroy }}
+      ECR_REPOSITORY_NAME_BEFORE_DESTROY: ${{ needs.prepare_and_plan.outputs.ecr_repository_name_before_destroy }}
+
+    steps:
+      - name: "📥 01 · Baixar código do repositório"
+        uses: actions/checkout@v7
+
+      - name: "🔑 02 · Configurar credenciais AWS"
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "🛠️ 03 · Instalar Terraform"
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: "🚀 04 · Inicializar Terraform"
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" init -input=false
+
+      - name: "📦 05 · Restaurar cache do state Terraform"
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate.backup
+          key: tfstate-kubernetes-${{ inputs.environment_name }}-${{ github.run_id }}
+          restore-keys: |
+            tfstate-kubernetes-${{ inputs.environment_name }}-
+
+      - name: "⬇️ 06 · Baixar plano do Terraform publicado"
+        uses: actions/download-artifact@v8
+        with:
+          name: tfplan-kubernetes-${{ github.run_id }}
+          path: ${{ env.TF_WORKING_DIRECTORY }}
+
+      - name: "✅ 07 · Aplicar plano do Terraform"
+        run: terraform -chdir="$TF_WORKING_DIRECTORY" apply -input=false -auto-approve tfplan
+
+      - name: "💾 08 · Salvar cache final do state Terraform"
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate
+            ${{ env.TF_WORKING_DIRECTORY }}/terraform.tfstate.backup
+          key: tfstate-kubernetes-${{ inputs.environment_name }}-${{ github.run_id }}
+
+      - name: "🔎 09 · Validar Kubernetes real após apply"
+        if: env.TERRAFORM_ACTION == 'apply'
+        run: |
+          set -euo pipefail
+
+          cluster_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw eks_cluster_name)"
+          node_group_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw eks_node_group_name)"
+          ecr_repository_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw ecr_repository_name)"
+
+          cluster_status="$(aws eks describe-cluster --name "$cluster_name" --query 'cluster.status' --output text)"
+          if [ "$cluster_status" != "ACTIVE" ]; then
+            echo "::error::EKS cluster $cluster_name is not ACTIVE. Current status: $cluster_status"
+            exit 1
+          fi
+
+          node_group_status="$(aws eks describe-nodegroup --cluster-name "$cluster_name" --nodegroup-name "$node_group_name" --query 'nodegroup.status' --output text)"
+          if [ "$node_group_status" != "ACTIVE" ]; then
+            echo "::error::EKS node group $node_group_name is not ACTIVE. Current status: $node_group_status"
+            exit 1
+          fi
+
+          aws ecr describe-repositories --repository-names "$ecr_repository_name" --query 'repositories[0].repositoryUri' --output text
+
+          ssm_cluster_name="$(aws ssm get-parameter --name "$SSM_KUBERNETES_PREFIX/cluster_name" --query 'Parameter.Value' --output text)"
+          if [ "$ssm_cluster_name" != "$cluster_name" ]; then
+            echo "::error::Kubernetes SSM cluster name differs from Terraform output. Terraform=$cluster_name SSM=$ssm_cluster_name"
+            exit 1
+          fi
+
+          ssm_status="$(aws ssm get-parameter --name "$SSM_KUBERNETES_STATUS_PARAMETER" --query 'Parameter.Value' --output text)"
+          if [ "$ssm_status" != "ready" ]; then
+            echo "::error::Kubernetes SSM status differs from expected value. Expected=ready Current=$ssm_status"
+            exit 1
+          fi
+
+          echo "Kubernetes infrastructure validated successfully in AWS and SSM."
+
+      - name: "🔎 09 · Validar remoção real após destroy"
+        if: env.TERRAFORM_ACTION == 'destroy'
+        run: |
+          set -euo pipefail
+
+          if [ -z "$CLUSTER_NAME_BEFORE_DESTROY" ] || [ -z "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" ]; then
+            echo "::error::Destroy without previous context. It is not safe to confirm removal."
+            exit 1
+          fi
+
+          if aws eks describe-cluster --name "$CLUSTER_NAME_BEFORE_DESTROY" >/dev/null 2>&1; then
+            echo "::error::EKS cluster $CLUSTER_NAME_BEFORE_DESTROY still exists after destroy."
+            exit 1
+          fi
+
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" >/dev/null 2>&1; then
+            echo "::error::ECR repository $ECR_REPOSITORY_NAME_BEFORE_DESTROY still exists after destroy."
+            exit 1
+          fi
+
+          if aws ssm get-parameter --name "$SSM_KUBERNETES_STATUS_PARAMETER" >/dev/null 2>&1; then
+            echo "::error::Kubernetes status parameter still exists after destroy."
+            exit 1
+          fi
+
+          echo "Kubernetes resources removed and SSM status cleaned."
