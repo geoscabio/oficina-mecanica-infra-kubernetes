@@ -34,7 +34,9 @@ Toda mudanca deve passar por PR, CI, aprovacao e Quality gate. Maintainers e adm
 
 | Workflow | Responsabilidade |
 | --- | --- |
-| `ci.yml` | Validar PR, Git Flow e Terraform quando houver mudanca deployable. |
+| `ci-development.yml` | Validar PR para `develop`, Git Flow e Terraform quando houver mudanca deployable. |
+| `ci-release.yml` | Validar PR para `release` ou `release/**`, Git Flow e Terraform quando houver mudanca deployable. |
+| `ci-production.yml` | Validar PR para `main`, Git Flow e Terraform quando houver mudanca deployable. |
 | `cd-development.yml` | Detectar mudanca deployable em `develop`, chamar o deploy real e abrir PR para `release` quando habilitado. |
 | `aws-deploy.yml` | Resolver `apply`/`destroy`, gerar plano, aplicar Terraform, validar AWS e publicar state em cache. |
 | `cd-release.yml` | Registrar deploy logico em `homologation` e abrir PR para `main` quando habilitado. |

@@ -45,7 +45,7 @@ jobs:
           terraform_action="apply"
 
           if [ -f "$control_file" ]; then
-            configured_action="$(grep -E '^[[:space:]]*TERRAFORM_ACTION[[:space:]]=' "$control_file" | tail -n 1 | cut -d '=' -f 2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
+            configured_action="$(grep -E '^[[:space:]]*TERRAFORM_ACTION[[:space:]]*=' "$control_file" | tail -n 1 | cut -d '=' -f 2- | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
 
             if [ -n "$configured_action" ]; then
               terraform_action="$configured_action"
