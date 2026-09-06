@@ -1,21 +1,21 @@
-# Oficina Mecanica Infra Kubernetes
+# ☸️ Oficina Mecânica Infra Kubernetes
 
-Repositorio da esteira Kubernetes da Fase 3 do Tech Challenge.
+Repositório da esteira Kubernetes da Fase 3 do Tech Challenge.
 
-## Objetivo
+## 🎯 Objetivo
 
-Provisionar e operar a base Kubernetes da solucao da Oficina Mecanica em AWS, mantendo o mesmo padrao de CI/CD usado na API e nas demais esteiras de infraestrutura.
+Provisionar e operar a base Kubernetes da solução da Oficina Mecânica em AWS, mantendo o mesmo padrão de CI/CD usado na API e nas demais esteiras de infraestrutura.
 
-## Responsabilidades
+## 📌 Responsabilidades
 
 - Criar o cluster EKS de `development`.
 - Criar o Managed Node Group.
-- Criar o repositorio ECR usado pela imagem da API.
+- Criar o repositório ECR usado pela imagem da API.
 - Consumir os outputs da VPC publicados no SSM Parameter Store.
-- Publicar outputs de Kubernetes e ECR no SSM para as proximas esteiras.
-- Controlar `apply` e `destroy` por workflow com validacoes reais na AWS.
+- Publicar outputs de Kubernetes e ECR no SSM para as próximas esteiras.
+- Controlar `apply` e `destroy` por workflow com validações reais na AWS.
 
-## Fluxo Git
+## 🔀 Fluxo Git
 
 ```text
 branch de trabalho -> PR develop -> deploy development -> PR release -> deploy homologation -> PR main -> deploy production
@@ -28,37 +28,37 @@ Branches protegidas esperadas:
 - `release/*`
 - `main`
 
-Toda mudanca deve passar por PR, CI, aprovacao e Quality gate. Maintainers e admins podem usar bypass somente via PR quando necessario.
+Toda mudança deve passar por PR, CI, aprovação e Quality gate. Maintainers e admins podem usar bypass somente via PR quando necessário.
 
-## Workflows
+## 🔁 Workflows
 
 | Workflow | Responsabilidade |
 | --- | --- |
-| `ci-development.yml` | Validar PR para `develop`, Git Flow e Terraform quando houver mudanca deployable. |
-| `ci-release.yml` | Validar PR para `release` ou `release/**`, Git Flow e Terraform quando houver mudanca deployable. |
-| `ci-production.yml` | Validar PR para `main`, Git Flow e Terraform quando houver mudanca deployable. |
-| `cd-development.yml` | Detectar mudanca deployable em `develop`, chamar o deploy real e abrir PR para `release` quando habilitado. |
-| `aws-deploy.yml` | Resolver `apply`/`destroy`, gerar plano, aplicar Terraform, validar AWS e publicar state em cache. |
-| `cd-release.yml` | Registrar deploy logico em `homologation` e abrir PR para `main` quando habilitado. |
-| `cd-production.yml` | Registrar deploy logico em `production`. |
+| `🧪 CI Development` | Validar PR para `develop`, Git Flow e Terraform quando houver mudança deployable. |
+| `🔎 CI Release` | Validar PR para `release` ou `release/**`, Git Flow e Terraform quando houver mudança deployable. |
+| `🛡️ CI Production` | Validar PR para `main`, Git Flow e Terraform quando houver mudança deployable. |
+| `🚀 CD Development` | Detectar mudança deployable em `develop`, chamar o deploy real e abrir PR para `release` quando habilitado. |
+| `☁️ AWS Deploy` | Resolver `apply`/`destroy`, gerar plano, aplicar Terraform, validar AWS e publicar state em cache. |
+| `🔀 CD Release` | Registrar deploy lógico em `homologation` e abrir PR para `main` quando habilitado. |
+| `🏁 CD Production` | Registrar deploy lógico em `production`. |
 
-O desenho dos workflows segue a API. A diferenca fica apenas no conteudo tecnico de cada job: aqui a validacao e o deploy sao de Terraform/EKS/ECR.
+O desenho dos workflows segue a API. A diferença fica apenas no conteúdo técnico de cada job: aqui a validação e o deploy são de Terraform/EKS/ECR.
 
-## Dependencia da VPC
+## 🌐 Dependência da VPC
 
-Antes de aplicar Kubernetes, a VPC precisa estar pronta e publicar os parametros abaixo:
+Antes de aplicar Kubernetes, a VPC precisa estar pronta e publicar os parâmetros abaixo:
 
-| Parametro SSM | Uso |
+| Parâmetro SSM | Uso |
 | --- | --- |
 | `/oficina-mecanica/development/status/vpc` | Deve estar com valor `ready`. |
 | `/oficina-mecanica/development/vpc/vpc_id` | VPC usada pelo EKS. |
 | `/oficina-mecanica/development/vpc/private_subnet_ids` | Subnets privadas usadas pelo cluster e pelo node group. |
 
-## Outputs publicados
+## 📤 Outputs publicados
 
 Depois do apply, esta esteira publica:
 
-| Parametro SSM | Uso |
+| Parâmetro SSM | Uso |
 | --- | --- |
 | `/oficina-mecanica/development/status/kubernetes` | Marca Kubernetes como pronto para dependentes. |
 | `/oficina-mecanica/development/kubernetes/cluster_name` | Nome do cluster EKS. |
@@ -68,7 +68,7 @@ Depois do apply, esta esteira publica:
 | `/oficina-mecanica/development/kubernetes/ecr_repository_name` | Nome do ECR da API. |
 | `/oficina-mecanica/development/kubernetes/ecr_repository_url` | URL do ECR da API. |
 
-## Variaveis e secrets
+## 🔐 Variáveis e secrets
 
 Configurar no GitHub Environment `development` antes do primeiro merge para `develop` que execute deploy real.
 
@@ -78,21 +78,21 @@ Environment secrets:
 | --- | --- |
 | `AWS_ACCESS_KEY_ID` | Credencial AWS Academy. |
 | `AWS_SECRET_ACCESS_KEY` | Credencial AWS Academy. |
-| `AWS_SESSION_TOKEN` | Token de sessao AWS Academy. |
+| `AWS_SESSION_TOKEN` | Token de sessão AWS Academy. |
 
 Environment variables:
 
 | Nome | Valor sugerido |
 | --- | --- |
 | `AWS_REGION` | `us-east-1` |
-| `EKS_CLUSTER_ROLE_NAME` | `LabRole` quando o lab usar role unica, ou a role EKS indicada pela AWS Academy. |
-| `EKS_NODE_ROLE_NAME` | `LabRole` quando o lab usar role unica, ou a role de nodes indicada pela AWS Academy. |
-| `AUTO_PR_ENABLED` | `true` somente quando quiser abrir PRs automaticos de promocao. |
+| `EKS_CLUSTER_ROLE_NAME` | `LabRole` quando o lab usar role única, ou a role EKS indicada pela AWS Academy. |
+| `EKS_NODE_ROLE_NAME` | `LabRole` quando o lab usar role única, ou a role de nodes indicada pela AWS Academy. |
+| `AUTO_PR_ENABLED` | `true` somente quando quiser abrir PRs automáticos de promoção. |
 | `RELEASE_BRANCH` | `release` |
 
-## Controle apply/destroy
+## 🧭 Controle apply/destroy
 
-O deploy real e controlado por:
+O deploy real é controlado por:
 
 ```text
 infra/terraform/environments/dev/terraform-action.env
@@ -110,11 +110,11 @@ Para destruir Kubernetes:
 TERRAFORM_ACTION=destroy
 ```
 
-Regra de seguranca: `destroy` so e aceito quando `terraform-action.env` muda no proprio PR/merge. Isso evita destruir recursos em execucoes futuras por acidente.
+Regra de segurança: `destroy` só é aceito quando `terraform-action.env` muda no próprio PR/merge. Isso evita destruir recursos em execuções futuras por acidente.
 
-## Execucao local
+## 🧪 Execução local
 
-Validar formatacao:
+Validar formatação:
 
 ```powershell
 terraform fmt -check -recursive infra/terraform
@@ -127,7 +127,7 @@ terraform -chdir=infra/terraform/environments/dev init -backend=false
 terraform -chdir=infra/terraform/environments/dev validate
 ```
 
-Gerar plano local, depois de configurar credenciais AWS e variaveis obrigatorias:
+Gerar plano local, depois de configurar credenciais AWS e variáveis obrigatórias:
 
 ```powershell
 $env:TF_VAR_eks_cluster_role_name = "LabRole"
@@ -135,7 +135,7 @@ $env:TF_VAR_eks_node_role_name = "LabRole"
 terraform -chdir=infra/terraform/environments/dev plan
 ```
 
-## Ordem da Fase 3
+## 🗓️ Ordem da Fase 3
 
 Esta esteira deve rodar depois da VPC e antes do deploy da API no EKS.
 
@@ -143,4 +143,4 @@ Esta esteira deve rodar depois da VPC e antes do deploy da API no EKS.
 infra-vpc -> infra-kubernetes -> api -> infra-api-gateway
 ```
 
-RDS e Kubernetes podem evoluir em paralelo depois que a VPC estiver disponivel.
+RDS e Kubernetes podem evoluir em paralelo depois que a VPC estiver disponível.
