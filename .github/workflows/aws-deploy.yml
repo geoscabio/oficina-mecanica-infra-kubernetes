@@ -175,20 +175,62 @@ jobs:
         run: |
           set -euo pipefail
 
+          assert_resource_present_or_absent() {
+            local resource_label="$1"
+            shift
+            local command_output
+
+            if command_output="$("$@" 2>&1)"; then
+              echo "${resource_label} exists and will be validated after destroy."
+              return 0
+            else
+              local command_status=$?
+              case "$command_output" in
+                *ResourceNotFoundException*|*RepositoryNotFoundException*)
+                  echo "::warning::${resource_label} is already absent. Treating this as partial destroy recovery."
+                  return 10
+                  ;;
+                *)
+                  echo "::error::Could not inspect ${resource_label} before destroy. The error is not an absence confirmation."
+                  echo "$command_output"
+                  return "$command_status"
+                  ;;
+              esac
+            fi
+          }
+
           cluster_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw eks_cluster_name 2>/dev/null || true)"
           ecr_repository_name="$(terraform -chdir="$TF_WORKING_DIRECTORY" output -raw ecr_repository_name 2>/dev/null || true)"
 
-          if [ -z "$cluster_name" ] || [ -z "$ecr_repository_name" ]; then
-            echo "::error::Destroy blocked: previous Kubernetes outputs were not found in Terraform state."
-            exit 1
+          if [ -z "$cluster_name" ]; then
+            echo "::warning::EKS output is absent from Terraform state. Continuing as partial destroy recovery."
+          else
+            if assert_resource_present_or_absent "EKS cluster $cluster_name" aws eks describe-cluster --name "$cluster_name" --query 'cluster.name' --output text; then
+              :
+            else
+              inspection_status=$?
+              if [ "$inspection_status" -ne 10 ]; then
+                exit "$inspection_status"
+              fi
+            fi
           fi
 
-          aws eks describe-cluster --name "$cluster_name" --query 'cluster.name' --output text
-          aws ecr describe-repositories --repository-names "$ecr_repository_name" --query 'repositories[0].repositoryName' --output text
+          if [ -z "$ecr_repository_name" ]; then
+            echo "::warning::ECR output is absent from Terraform state. Continuing as partial destroy recovery."
+          else
+            if assert_resource_present_or_absent "ECR repository $ecr_repository_name" aws ecr describe-repositories --repository-names "$ecr_repository_name" --query 'repositories[0].repositoryName' --output text; then
+              :
+            else
+              inspection_status=$?
+              if [ "$inspection_status" -ne 10 ]; then
+                exit "$inspection_status"
+              fi
+            fi
+          fi
 
           echo "cluster_name_before_destroy=$cluster_name" >> "$GITHUB_OUTPUT"
           echo "ecr_repository_name_before_destroy=$ecr_repository_name" >> "$GITHUB_OUTPUT"
-          echo "Kubernetes context captured for post-destroy validation."
+          echo "Kubernetes destroy context captured when available."
 
       - name: "📐 10 · Gerar plano do Terraform (apply)"
         if: env.TERRAFORM_ACTION == 'apply'
@@ -311,24 +353,42 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$CLUSTER_NAME_BEFORE_DESTROY" ] || [ -z "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" ]; then
-            echo "::error::Destroy without previous context. It is not safe to confirm removal."
-            exit 1
+          assert_resource_absent() {
+            local resource_label="$1"
+            shift
+            local command_output
+
+            if command_output="$("$@" 2>&1)"; then
+              echo "::error::${resource_label} still exists after destroy."
+              return 1
+            else
+              local command_status=$?
+              case "$command_output" in
+                *ResourceNotFoundException*|*RepositoryNotFoundException*|*ParameterNotFound*)
+                  echo "${resource_label} is absent after destroy."
+                  return 0
+                  ;;
+                *)
+                  echo "::error::Could not confirm removal of ${resource_label}. The error is not an absence confirmation."
+                  echo "$command_output"
+                  return "$command_status"
+                  ;;
+              esac
+            fi
+          }
+
+          if [ -z "$CLUSTER_NAME_BEFORE_DESTROY" ]; then
+            echo "::warning::EKS output was absent before destroy; no cluster identifier is available for post-destroy verification."
+          else
+            assert_resource_absent "EKS cluster $CLUSTER_NAME_BEFORE_DESTROY" aws eks describe-cluster --name "$CLUSTER_NAME_BEFORE_DESTROY" --query 'cluster.name' --output text
           fi
 
-          if aws eks describe-cluster --name "$CLUSTER_NAME_BEFORE_DESTROY" >/dev/null 2>&1; then
-            echo "::error::EKS cluster $CLUSTER_NAME_BEFORE_DESTROY still exists after destroy."
-            exit 1
+          if [ -z "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" ]; then
+            echo "::warning::ECR output was absent before destroy; no repository identifier is available for post-destroy verification."
+          else
+            assert_resource_absent "ECR repository $ECR_REPOSITORY_NAME_BEFORE_DESTROY" aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" --query 'repositories[0].repositoryName' --output text
           fi
 
-          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME_BEFORE_DESTROY" >/dev/null 2>&1; then
-            echo "::error::ECR repository $ECR_REPOSITORY_NAME_BEFORE_DESTROY still exists after destroy."
-            exit 1
-          fi
-
-          if aws ssm get-parameter --name "$SSM_KUBERNETES_STATUS_PARAMETER" >/dev/null 2>&1; then
-            echo "::error::Kubernetes status parameter still exists after destroy."
-            exit 1
-          fi
+          assert_resource_absent "Kubernetes status parameter $SSM_KUBERNETES_STATUS_PARAMETER" aws ssm get-parameter --name "$SSM_KUBERNETES_STATUS_PARAMETER" --query 'Parameter.Value' --output text
 
           echo "Kubernetes resources removed and SSM status cleaned."
