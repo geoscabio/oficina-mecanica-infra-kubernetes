@@ -43,7 +43,9 @@ Repetir este padrão em cada novo repositório. A configuração detalhada está
 
 | Workflow | Responsabilidade |
 | --- | --- |
-| `🧪 CI` | Workflow único para PR e push em `develop`, `release`, `release/**` e `main`; valida código e Git Flow. |
+| `🧪 CI Development` | Validar PR para `develop`, Git Flow e Terraform quando houver mudança deployable. |
+| `🔎 CI Release` | Validar PR para `release` ou `release/**`, Git Flow e Terraform quando houver mudança deployable. |
+| `🛡️ CI Production` | Validar PR para `main`, Git Flow e Terraform quando houver mudança deployable. |
 | `🚀 CD Development` | Detectar mudança deployable em `develop`, chamar o deploy real e abrir PR para `release` quando habilitado. |
 | `☁️ AWS Deploy` | Resolver `apply`/`destroy`, gerar plano, aplicar Terraform, validar AWS e publicar state em cache. |
 | `🔀 CD Release` | Registrar deploy lógico em `homologation` e abrir PR para `main` quando habilitado. |
@@ -151,23 +153,3 @@ infra-vpc -> infra-kubernetes -> api -> infra-api-gateway
 ```
 
 RDS e Kubernetes podem evoluir em paralelo depois que a VPC estiver disponível.
-
-### CI única e progressão do CD
-
-O arquivo `.github/workflows/ci.yml` concentra a integração contínua. O mesmo
-workflow valida cada PR e o commit resultante do merge; não existe uma CI por
-ambiente. O CD aguarda uma execução `push` aprovada desse workflow, do mesmo
-repositório, branch e SHA. Falha, cancelamento, ausência ou timeout bloqueiam a entrega.
-Os nomes dos checks obrigatórios existentes foram preservados.
-
-Somente Markdown pode dispensar validações pesadas. Arquivos executáveis em `docs/`
-também passam pela CI. A concorrência da CI cancela validações antigas; a do CD
-preserva a execução em andamento para não interromper Terraform.
-
-`development` é o ambiente físico. `release` e `main` registram homologação e
-produção lógicas, conforme ADR-0010, sem provisionar outros ambientes AWS.
-A promoção automática para `release` exige deploy físico concluído com sucesso;
-mudanças sem deploy não são apresentadas como um deploy validado. Merges e
-aprovações continuam humanos. Nenhum workflow aprova ou faz merge de PR.
-
-Veja a [auditoria de CI/CD](docs/auditoria-ci-cd.md) para verificações e limitações.
