@@ -1,10 +1,13 @@
-name: "🧪 CI Development"
-run-name: "🧪 Validar PR para develop"
+name: "🧪 CI"
+run-name: "🧪 Validar código · ${{ github.head_ref || github.ref_name }}"
 
 on:
   pull_request:
     branches:
       - develop
+      - release
+      - "release/**"
+      - main
 
 permissions:
   contents: read
@@ -50,7 +53,7 @@ jobs:
 
             while IFS= read -r file; do
               case "$file" in
-                README.md|docs/*|*.md)
+                *.md)
                   ;;
                 *)
                   ci_required=true
@@ -134,29 +137,14 @@ jobs:
 
       - name: "🎨 03 · Verificar formatação Terraform"
         run: |
-          if [ ! -d "infra/terraform" ]; then
-            echo "Terraform directory not found yet. Skipping Terraform format validation."
-            exit 0
-          fi
-
           terraform fmt -check -recursive infra/terraform
 
       - name: "🚀 04 · Inicializar Terraform sem backend"
         run: |
-          if [ ! -d "$TF_WORKING_DIRECTORY" ]; then
-            echo "Terraform working directory not found yet. Skipping Terraform init."
-            exit 0
-          fi
-
           terraform -chdir="$TF_WORKING_DIRECTORY" init -backend=false -input=false
 
       - name: "🔍 05 · Validar configuração Terraform"
         run: |
-          if [ ! -d "$TF_WORKING_DIRECTORY" ]; then
-            echo "Terraform working directory not found yet. Skipping Terraform validate."
-            exit 0
-          fi
-
           terraform -chdir="$TF_WORKING_DIRECTORY" validate
 
   quality_gate:
