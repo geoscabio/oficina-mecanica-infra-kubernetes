@@ -53,6 +53,18 @@ resource "aws_ssm_parameter" "ecr_repository_url" {
 }
 
 resource "aws_ssm_parameter" "status" {
+  # Publicar ready somente após concluir a infraestrutura e seus contratos SSM.
+  depends_on = [
+    module.eks,
+    module.ecr,
+    aws_ssm_parameter.cluster_name,
+    aws_ssm_parameter.cluster_endpoint,
+    aws_ssm_parameter.cluster_security_group_id,
+    aws_ssm_parameter.node_group_name,
+    aws_ssm_parameter.ecr_repository_name,
+    aws_ssm_parameter.ecr_repository_url,
+  ]
+
   name        = var.kubernetes_status_parameter_name
   description = "Operational status of the shared Kubernetes infrastructure."
   type        = "String"
