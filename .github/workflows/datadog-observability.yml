@@ -2,6 +2,7 @@ name: "🐕 Observabilidade Datadog"
 run-name: "🐕 Instalar ou atualizar Datadog no EKS"
 
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:

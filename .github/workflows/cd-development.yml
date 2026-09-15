@@ -22,7 +22,8 @@ jobs:
     name: "🔎 01 · Detectar se há mudança que exige deploy"
     runs-on: ubuntu-latest
     outputs:
-      deploy_required: ${{ steps.detect.outputs.deploy_required }}
+      terraform_deploy_required: ${{ steps.detect.outputs.terraform_deploy_required }}
+      datadog_deploy_required: ${{ steps.detect.outputs.datadog_deploy_required }}
 
     steps:
       - name: "📥 01 · Baixar código do repositório"
@@ -35,7 +36,8 @@ jobs:
         env:
           GITHUB_BEFORE: ${{ github.event.before }}
         run: |
-          deploy_required=false
+          terraform_deploy_required=false
+          datadog_deploy_required=false
           head_sha="$GITHUB_SHA"
           base_sha="$GITHUB_BEFORE"
 
@@ -50,50 +52,75 @@ jobs:
           changed_files="$(mktemp)"
           git diff --name-only "$base_ref" "$head_sha" > "$changed_files"
 
-          if [ ! -s "$changed_files" ]; then
-            deploy_required=false
-          else
+          if [ -s "$changed_files" ]; then
             echo "Files changed in the current push from $base_ref to $head_sha:"
             cat "$changed_files"
 
             while IFS= read -r file; do
               case "$file" in
-                  infra/terraform/*)
-                    echo "Deployable change detected: $file"
-                    deploy_required=true
-                    break
-                    ;;
+                infra/terraform/*)
+                  echo "Terraform deployable change detected: $file"
+                  terraform_deploy_required=true
+                  ;;
+                observability/datadog/*|.github/workflows/datadog-observability.yml)
+                  echo "Datadog deployable change detected: $file"
+                  datadog_deploy_required=true
+                  ;;
                 *)
                   ;;
               esac
             done < "$changed_files"
           fi
 
-          echo "deploy_required=$deploy_required" >> "$GITHUB_OUTPUT"
-          echo "Deploy required: $deploy_required"
+          echo "terraform_deploy_required=$terraform_deploy_required" >> "$GITHUB_OUTPUT"
+          echo "datadog_deploy_required=$datadog_deploy_required" >> "$GITHUB_OUTPUT"
+          echo "Terraform deploy required: $terraform_deploy_required"
+          echo "Datadog deploy required: $datadog_deploy_required"
 
   deploy-development:
     name: "☁️ 02 · Deploy em development"
     needs: detect-deploy-scope
-    if: needs.detect-deploy-scope.outputs.deploy_required == 'true'
+    if: needs.detect-deploy-scope.outputs.terraform_deploy_required == 'true'
     uses: ./.github/workflows/aws-deploy.yml
     with:
       environment_name: development
     secrets: inherit
 
-  open-pr-to-release:
-    name: "🔀 03 · Abrir PR para release"
-    runs-on: ubuntu-latest
+  deploy-datadog:
+    name: "🐕 03 · Observabilidade Datadog"
     needs:
       - detect-deploy-scope
       - deploy-development
     if: >-
       !cancelled() &&
+      needs.detect-deploy-scope.result == 'success' &&
+      ((needs.deploy-development.result == 'success' &&
+        needs.deploy-development.outputs.terraform_action == 'apply') ||
+       (needs.detect-deploy-scope.outputs.terraform_deploy_required == 'false' &&
+        needs.detect-deploy-scope.outputs.datadog_deploy_required == 'true' &&
+        needs.deploy-development.result == 'skipped'))
+    uses: ./.github/workflows/datadog-observability.yml
+    secrets: inherit
+
+  open-pr-to-release:
+    name: "🔀 04 · Abrir PR para release"
+    runs-on: ubuntu-latest
+    needs:
+      - detect-deploy-scope
+      - deploy-development
+      - deploy-datadog
+    if: >-
+      !cancelled() &&
       vars.AUTO_PR_ENABLED == 'true' &&
       needs.detect-deploy-scope.result == 'success' &&
       (needs.deploy-development.result == 'success' ||
-       (needs.detect-deploy-scope.outputs.deploy_required == 'false' &&
-        needs.deploy-development.result == 'skipped'))
+       (needs.detect-deploy-scope.outputs.terraform_deploy_required == 'false' &&
+        needs.deploy-development.result == 'skipped')) &&
+      (needs.deploy-datadog.result == 'success' ||
+       (needs.deploy-datadog.result == 'skipped' &&
+        (needs.deploy-development.outputs.terraform_action == 'destroy' ||
+         (needs.detect-deploy-scope.outputs.terraform_deploy_required == 'false' &&
+          needs.detect-deploy-scope.outputs.datadog_deploy_required == 'false'))))
     env:
       TERRAFORM_ACTION: ${{ needs.deploy-development.outputs.terraform_action }}
 
