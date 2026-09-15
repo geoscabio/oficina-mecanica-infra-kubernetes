@@ -1,14 +1,5 @@
-data "aws_eks_node_group" "api_nodes" {
-  cluster_name    = var.cluster_name
-  node_group_name = var.node_group_name
-}
-
-data "aws_eks_cluster" "api" {
-  name = var.cluster_name
-}
-
 locals {
-  api_node_group_asg_name = data.aws_eks_node_group.api_nodes.resources[0].autoscaling_groups[0].name
+  api_node_group_asg_name = module.eks.node_group_autoscaling_group_name
 
   api_private_ingress_tags = merge(local.common_tags, {
     Component = "ApiPrivateIngress"
@@ -29,7 +20,7 @@ resource "aws_security_group" "api_internal_nlb" {
 # The future API Gateway VPC Link will add the only ingress rule to this SG.
 resource "aws_vpc_security_group_egress_rule" "api_internal_nlb_to_nodes" {
   security_group_id            = aws_security_group.api_internal_nlb.id
-  referenced_security_group_id = data.aws_eks_cluster.api.vpc_config[0].cluster_security_group_id
+  referenced_security_group_id = module.eks.cluster_security_group_id
   ip_protocol                  = "tcp"
   from_port                    = var.api_internal_node_port
   to_port                      = var.api_internal_node_port
@@ -37,7 +28,7 @@ resource "aws_vpc_security_group_egress_rule" "api_internal_nlb_to_nodes" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "nodes_from_api_internal_nlb" {
-  security_group_id            = data.aws_eks_cluster.api.vpc_config[0].cluster_security_group_id
+  security_group_id            = module.eks.cluster_security_group_id
   referenced_security_group_id = aws_security_group.api_internal_nlb.id
   ip_protocol                  = "tcp"
   from_port                    = var.api_internal_node_port
