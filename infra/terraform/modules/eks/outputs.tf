@@ -17,3 +17,8 @@ output "node_group_name" {
   description = "Nome do Managed Node Group."
   value       = aws_eks_node_group.this.node_group_name
 }
+
+output "node_group_autoscaling_group_name" {
+  description = "Nome do Auto Scaling Group associado ao Managed Node Group."
+  value       = aws_eks_node_group.this.resources[0].autoscaling_groups[0].name
+}
