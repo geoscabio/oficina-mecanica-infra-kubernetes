@@ -21,5 +21,8 @@ datadog:
   processAgent:
     processCollection: false
 
+  operator:
+    enabled: false
+
 clusterAgent:
   enabled: true
