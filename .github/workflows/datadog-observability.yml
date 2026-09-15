@@ -206,11 +206,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          kubectl rollout status daemonset --all \
+          kubectl rollout status daemonset/datadog \
             --namespace "$DATADOG_NAMESPACE" \
             --timeout=10m
 
-          kubectl rollout status deployment --all \
+          kubectl rollout status deployment/datadog-cluster-agent \
             --namespace "$DATADOG_NAMESPACE" \
             --timeout=10m
 
