@@ -72,3 +72,57 @@ resource "aws_ssm_parameter" "status" {
 
   tags = local.common_tags
 }
+
+resource "aws_ssm_parameter" "api_internal_node_port" {
+  name        = "${var.kubernetes_ssm_prefix}/api_internal_node_port"
+  description = "Contractual NodePort used by the API private ingress."
+  type        = "String"
+  value       = tostring(var.api_internal_node_port)
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "internal_nlb_arn" {
+  name        = "${var.kubernetes_ssm_prefix}/internal_nlb_arn"
+  description = "ARN of the internal NLB used by the API private ingress."
+  type        = "String"
+  value       = aws_lb.api_internal.arn
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "internal_nlb_dns_name" {
+  name        = "${var.kubernetes_ssm_prefix}/internal_nlb_dns_name"
+  description = "DNS name of the internal NLB used by the API private ingress."
+  type        = "String"
+  value       = aws_lb.api_internal.dns_name
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "internal_nlb_security_group_id" {
+  name        = "${var.kubernetes_ssm_prefix}/internal_nlb_security_group_id"
+  description = "Security group ID attached to the internal API NLB."
+  type        = "String"
+  value       = aws_security_group.api_internal_nlb.id
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "internal_nlb_target_group_arn" {
+  name        = "${var.kubernetes_ssm_prefix}/internal_nlb_target_group_arn"
+  description = "ARN of the target group used by the API private ingress."
+  type        = "String"
+  value       = aws_lb_target_group.api_internal.arn
+
+  tags = local.common_tags
+}
+
+resource "aws_ssm_parameter" "internal_nlb_listener_arn" {
+  name        = "${var.kubernetes_ssm_prefix}/internal_nlb_listener_arn"
+  description = "ARN of the listener consumed by the future API Gateway VPC Link."
+  type        = "String"
+  value       = aws_lb_listener.api_internal.arn
+
+  tags = local.common_tags
+}

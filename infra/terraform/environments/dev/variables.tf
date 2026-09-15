@@ -97,3 +97,14 @@ variable "kubernetes_status_parameter_name" {
   type        = string
   default     = "/oficina-mecanica/development/status/kubernetes"
 }
+
+variable "api_internal_node_port" {
+  description = "Contractual NodePort used by the API private ingress."
+  type        = number
+  default     = 30080
+
+  validation {
+    condition     = var.api_internal_node_port >= 30000 && var.api_internal_node_port <= 32767
+    error_message = "The API internal NodePort must be between 30000 and 32767."
+  }
+}
