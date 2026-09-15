@@ -1,16 +1,42 @@
-# Oficina Mecânica — Infraestrutura Kubernetes
+# ☸️ Oficina Mecânica — Infraestrutura Kubernetes
 
 EKS, node group, ECR, NLB interno e contratos do serviço NodePort da solução.
 A visão geral está no [README da API](https://github.com/geoscabio/oficina-mecanica-api#readme).
 
-## Responsabilidade e arquitetura
+---
+
+## 📌 Índice
+
+- [✨ Visão geral](#visao-geral)
+- [🏗️ Responsabilidade e arquitetura](#arquitetura)
+- [🧩 Repositórios da solução](#repositorios)
+- [🔐 Configuração, secrets e contratos](#configuracao)
+- [☁️ CI/CD e deploy base](#deploy)
+- [🐕 Observabilidade Datadog](#observabilidade)
+- [🧪 Validações e documentação](#validacoes)
+
+---
+
+<a id="visao-geral"></a>
+
+## ✨ Visão geral
+
+Este repositório concentra a infraestrutura Kubernetes compartilhada da solução.
+
+<a id="arquitetura"></a>
+
+## 🏗️ Responsabilidade e arquitetura
 
 O apply principal cria somente a infraestrutura base: EKS, node group, ECR e os
 contratos NLB existentes. A API não usa Service `LoadBalancer` público:
 
 `API Gateway -> VPC Link -> NLB interno -> target group -> EKS NodePort -> pods`
 
-## Repositórios da solução
+---
+
+<a id="repositorios"></a>
+
+## 🧩 Repositórios da solução
 
 | Repositório | Responsabilidade |
 |---|---|
@@ -21,7 +47,11 @@ contratos NLB existentes. A API não usa Service `LoadBalancer` público:
 | [RDS](https://github.com/geoscabio/oficina-mecanica-infra-rds) | SQL Server privado. |
 | [API Gateway](https://github.com/geoscabio/oficina-mecanica-infra-api-gateway) | Entrada HTTP e VPC Link. |
 
-## Configuração, secrets e contratos
+---
+
+<a id="configuracao"></a>
+
+## 🔐 Configuração, secrets e contratos
 
 | Nome | Tipo e escopo | Obrigatório | Finalidade |
 |---|---|---:|---|
@@ -40,12 +70,20 @@ Consome `/oficina-mecanica/development/status/vpc`, `/vpc/vpc_id` e
 `internal_nlb_listener_arn` e `status/kubernetes` sob
 `/oficina-mecanica/development`.
 
-## CI/CD e deploy base
+---
+
+<a id="deploy"></a>
+
+## ☁️ CI/CD e deploy base
 
 `aws-deploy.yml` preserva o fluxo atual de plan/apply/destroy da infraestrutura
 base. Para validação local, execute `terraform fmt -check`, `terraform validate`
 e `terraform plan` no diretório Terraform. O deploy de observabilidade não altera
 essa esteira.
+
+---
+
+<a id="observabilidade"></a>
 
 ## 🐕 Observabilidade Datadog
 
@@ -74,7 +112,11 @@ As credenciais AWS usadas nessa execução são `AWS_ACCESS_KEY_ID`,
 `AWS_REGION`. A identidade precisa ler o parâmetro SSM, descrever o EKS e obter
 acesso Kubernetes compatível com as autorizações validadas pelo workflow.
 
-## Validações e documentação
+---
+
+<a id="validacoes"></a>
+
+## 🧪 Validações e documentação
 
 Além dos checks do workflow, use `git diff --check`. Referências:
 [API principal](https://github.com/geoscabio/oficina-mecanica-api#readme),
