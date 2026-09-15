@@ -1,0 +1,221 @@
+name: "🐕 Observabilidade Datadog"
+run-name: "🐕 Instalar ou atualizar Datadog no EKS"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: datadog-observability-development
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  DD_SITE: ${{ vars.DD_SITE || 'datadoghq.com' }}
+  DATADOG_CHART_VERSION: "3.239.0"
+  DATADOG_NAMESPACE: datadog
+  DATADOG_RELEASE_NAME: datadog
+  SSM_KUBERNETES_CLUSTER_NAME: /oficina-mecanica/development/kubernetes/cluster_name
+
+jobs:
+  deploy-datadog:
+    name: "☁️ Instalar ou atualizar observabilidade"
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+
+    steps:
+      - name: "📥 01 · Baixar código do repositório"
+        uses: actions/checkout@v7
+
+      - name: "🔑 02 · Configurar credenciais AWS"
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: "☸️ 03 · Configurar kubectl"
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.33.4
+
+      - name: "⛵ 04 · Configurar Helm"
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+
+      - name: "🛡️ 05 · Validar contrato da API key"
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DD_API_KEY:-}" ]; then
+            echo "::error::O GitHub Environment Secret DD_API_KEY não está cadastrado em development."
+            exit 1
+          fi
+
+          echo "O secret DD_API_KEY está disponível para materialização segura no Kubernetes."
+
+      - name: "🔎 06 · Localizar e validar cluster EKS"
+        id: eks
+        run: |
+          set -euo pipefail
+
+          cluster_name="$(aws ssm get-parameter \
+            --name "$SSM_KUBERNETES_CLUSTER_NAME" \
+            --query 'Parameter.Value' \
+            --output text)"
+
+          if [ -z "$cluster_name" ] || [ "$cluster_name" = "None" ]; then
+            echo "::error::O contrato SSM não retornou um nome de cluster EKS válido."
+            exit 1
+          fi
+
+          cluster_status="$(aws eks describe-cluster \
+            --name "$cluster_name" \
+            --query 'cluster.status' \
+            --output text)"
+
+          if [ "$cluster_status" != "ACTIVE" ]; then
+            echo "::error::O cluster EKS $cluster_name não está ACTIVE. Status atual: $cluster_status."
+            exit 1
+          fi
+
+          echo "cluster_name=$cluster_name" >> "$GITHUB_OUTPUT"
+          echo "Cluster EKS $cluster_name está ACTIVE."
+
+      - name: "🔗 07 · Configurar acesso ao EKS"
+        env:
+          CLUSTER_NAME: ${{ steps.eks.outputs.cluster_name }}
+        run: |
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+
+      - name: "🩺 08 · Validar conectividade com Kubernetes"
+        run: |
+          set -euo pipefail
+
+          kubectl get --raw='/readyz' >/dev/null
+          echo "A API do Kubernetes está acessível."
+
+      - name: "🛡️ 09 · Validar autorizações Kubernetes"
+        run: |
+          set -euo pipefail
+
+          assert_allowed() {
+            local resource="$1"
+            local namespace="${2:-}"
+            local allowed
+
+            if [ -n "$namespace" ]; then
+              allowed="$(kubectl auth can-i create "$resource" --namespace "$namespace")"
+            else
+              allowed="$(kubectl auth can-i create "$resource")"
+            fi
+
+            if [ "$allowed" != "yes" ]; then
+              if [ -n "$namespace" ]; then
+                echo "::error::A identidade Kubernetes não pode criar $resource no namespace $namespace."
+              else
+                echo "::error::A identidade Kubernetes não pode criar $resource."
+              fi
+              exit 1
+            fi
+          }
+
+          assert_allowed namespaces
+          assert_allowed secrets "$DATADOG_NAMESPACE"
+          assert_allowed clusterroles
+          assert_allowed clusterrolebindings
+
+          echo "As autorizações Kubernetes mínimas foram confirmadas."
+
+      - name: "📦 10 · Criar namespace Datadog"
+        run: |
+          set -euo pipefail
+
+          kubectl create namespace "$DATADOG_NAMESPACE" \
+            --dry-run=client \
+            --output yaml \
+            | kubectl apply -f -
+
+      - name: "🔐 11 · Criar ou atualizar secret Datadog"
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          kubectl create secret generic datadog-secret \
+            --namespace "$DATADOG_NAMESPACE" \
+            --from-literal="api-key=$DD_API_KEY" \
+            --dry-run=client \
+            --output yaml \
+            | kubectl apply -f -
+
+          echo "O secret datadog-secret foi materializado sem exibir seu conteúdo."
+
+      - name: "🗂️ 12 · Configurar repositório Helm do Datadog"
+        run: |
+          set -euo pipefail
+
+          helm repo add datadog https://helm.datadoghq.com --force-update
+          helm repo update datadog
+
+      - name: "🧪 13 · Renderizar chart Datadog"
+        env:
+          CLUSTER_NAME: ${{ steps.eks.outputs.cluster_name }}
+        run: |
+          set -euo pipefail
+
+          helm template "$DATADOG_RELEASE_NAME" datadog/datadog \
+            --namespace "$DATADOG_NAMESPACE" \
+            --version "$DATADOG_CHART_VERSION" \
+            --values observability/datadog/values.yaml \
+            --set-string "datadog.clusterName=$CLUSTER_NAME" \
+            --set-string "datadog.site=$DD_SITE" \
+            > "$RUNNER_TEMP/datadog-rendered.yaml"
+
+          echo "Chart Datadog renderizado com sucesso."
+
+      - name: "🚀 14 · Instalar ou atualizar Datadog"
+        env:
+          CLUSTER_NAME: ${{ steps.eks.outputs.cluster_name }}
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "$DATADOG_RELEASE_NAME" datadog/datadog \
+            --namespace "$DATADOG_NAMESPACE" \
+            --version "$DATADOG_CHART_VERSION" \
+            --values observability/datadog/values.yaml \
+            --set-string "datadog.clusterName=$CLUSTER_NAME" \
+            --set-string "datadog.site=$DD_SITE" \
+            --atomic \
+            --wait \
+            --timeout 10m
+
+      - name: "⏳ 15 · Aguardar Agent e Cluster Agent"
+        run: |
+          set -euo pipefail
+
+          kubectl rollout status daemonset --all \
+            --namespace "$DATADOG_NAMESPACE" \
+            --timeout=10m
+
+          kubectl rollout status deployment --all \
+            --namespace "$DATADOG_NAMESPACE" \
+            --timeout=10m
+
+      - name: "📊 16 · Exibir status dos workloads Datadog"
+        if: always()
+        run: |
+          kubectl get daemonsets,deployments,pods \
+            --namespace "$DATADOG_NAMESPACE" \
+            --output wide

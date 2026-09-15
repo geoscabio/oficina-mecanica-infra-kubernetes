@@ -1,0 +1,28 @@
+targetSystem: linux
+
+datadog:
+  apiKeyExistingSecret: datadog-secret
+
+  # Valor documental. O workflow sempre o substitui pelo contrato SSM do EKS.
+  clusterName: oficina-mecanica-eks-dev
+
+  tags:
+    - env:development
+    - project:oficina-mecanica
+
+  logs:
+    enabled: true
+    containerCollectAll: true
+    containerCollectUsingFiles: true
+
+  apm:
+    portEnabled: true
+
+  processAgent:
+    processCollection: false
+
+  operator:
+    enabled: false
+
+clusterAgent:
+  enabled: true
