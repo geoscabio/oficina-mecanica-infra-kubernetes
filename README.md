@@ -14,6 +14,7 @@ Provisionar e operar a base Kubernetes da solução da Oficina Mecânica em AWS,
 - Consumir os outputs da VPC publicados no SSM Parameter Store.
 - Publicar outputs de Kubernetes e ECR no SSM para as próximas esteiras.
 - Controlar `apply` e `destroy` por workflow com validações reais na AWS.
+- Instalar e validar Datadog Agent e Cluster Agent no EKS.
 
 ## 🔀 Fluxo Git
 
@@ -98,6 +99,15 @@ Environment variables:
 | `EKS_NODE_ROLE_NAME` | `LabRole` quando o lab usar role única, ou a role de nodes indicada pela AWS Academy. |
 | `AUTO_PR_ENABLED` | `true` somente quando quiser abrir PRs automáticos de promoção. |
 | `RELEASE_BRANCH` | `release` |
+| `DD_SITE` | Site Datadog da organização, por exemplo `datadoghq.com`. |
+
+Environment secret adicional:
+
+| Nome | Uso |
+| --- | --- |
+| `DD_API_KEY` | API key do Datadog usada na instalação do Agent; criar em **Settings > Environments > development > Environment secrets**. |
+
+`DD_SITE` deve ser criado em **Settings > Environments > development > Environment variables**. O valor real de `DD_API_KEY` nunca deve ser versionado.
 
 ## 🧭 Controle apply/destroy
 
@@ -120,6 +130,10 @@ TERRAFORM_ACTION=destroy
 ```
 
 Regra de segurança: `destroy` só é aceito quando `terraform-action.env` muda no próprio PR/merge. Isso evita destruir recursos em execuções futuras por acidente.
+
+O deploy do Datadog ocorre automaticamente após mudanças relevantes e um `apply` bem-sucedido. O `workflow_dispatch` permanece como contingência manual. Em `destroy`, a esteira não tenta instalar Datadog.
+
+Para validar o runtime, confirme os nodes do EKS e os rollouts do Agent e Cluster Agent no namespace `datadog`, além dos parâmetros SSM publicados por esta esteira.
 
 ## 🧪 Execução local
 
@@ -153,3 +167,5 @@ infra-vpc -> infra-kubernetes -> api -> infra-api-gateway
 ```
 
 RDS e Kubernetes podem evoluir em paralelo depois que a VPC estiver disponível.
+
+Documentação central e arquitetura completa: [README da Oficina Mecânica API](https://github.com/geoscabio/oficina-mecanica-api).
